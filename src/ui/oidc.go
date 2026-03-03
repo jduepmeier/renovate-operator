@@ -62,7 +62,7 @@ func NewOIDCAuth(ctx context.Context, cfg OIDCConfig, logger logr.Logger) (*OIDC
 		ClientSecret: cfg.ClientSecret,
 		RedirectURL:  cfg.RedirectURL,
 		Endpoint:     provider.Endpoint(),
-		Scopes:       []string{oidc.ScopeOpenID, "email", "profile", "groups"},
+		Scopes:       []string{oidc.ScopeOpenID, "email", "profile"},
 	}
 
 	verifier := provider.Verifier(&oidc.Config{ClientID: cfg.ClientID})
@@ -174,6 +174,26 @@ func (o *OIDCAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		"user", claims.Email,
 		"name", claims.Name,
 		"groups", claims.Groups)
+
+	if len(claims.Groups) == 0 {
+		userInfo, err := o.provider.UserInfo(exchangeCtx, oauth2.StaticTokenSource(oauth2Token))
+		if err != nil {
+			o.logger.Error(err, "failed to get userinfo")
+			http.Error(w, "failed to get userinfo", http.StatusInternalServerError)
+			return
+		}
+
+		err = userInfo.Claims(&claims)
+		if err != nil {
+			o.logger.Error(err, "failed to parse userinfo claims")
+			http.Error(w, "failed to parse userinfo claims", http.StatusInternalServerError)
+			return
+		}
+		o.logger.V(1).Info("OIDC userinfo claims received",
+			"user", claims.Email,
+			"name", claims.Name,
+			"groups", claims.Groups)
+	}
 
 	// Apply 3-layer group validation
 	validatedGroups := ValidateAndNormalizeGroups(claims.Groups, o.groupFilterConfig, o.logger)
